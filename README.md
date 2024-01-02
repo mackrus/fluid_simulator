@@ -1,16 +1,17 @@
 # Fluid Simulator
 
-This project is a fluid dynamics simulator that visualizes the behavior of fluids with various properties and forces applied to them. It is designed to be an educational tool for understanding fluid mechanics and a foundation for further development in physics simulations.
+This project is a fluid dynamics simulator that visualizes the behavior of a wind tunnel. It is designed to be an educational tool for understanding fluid mechanics and a foundation for further development in physics simulations.
 
 ## Features
 
 - Real-time fluid dynamics simulation
-- Interactive environment with adjustable parameters
-- Visualization of fluid flow and pressure fields
+- Visualization of fluid flow
 
 ## Getting Started
 
 To get a local copy up and running, follow these simple steps.
+
+To use the simulator in your browser, click [here] (<https://mackrus.github.io/fluid_simulator/>).
 
 ### Prerequisites
 
@@ -35,6 +36,8 @@ To get a local copy up and running, follow these simple steps.
 ## Usage
 
 Interact with the simulation through the provided user interface to adjust parameters such as viscosity, density, and external forces. The changes will be reflected in real-time within the simulation.
+
+Visit [this wesite] (<https://mackrus.github.io/fluid_simulator/>)
 
 ## Contributing
 
