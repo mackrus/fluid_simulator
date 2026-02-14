@@ -1,3 +1,5 @@
+import { MLModule } from './ml_module.js';
+
 /**
  * @typedef {Object} SceneConfig
  * @property {number} dt - Time step
@@ -36,6 +38,35 @@ class Fluid {
         this.newM = new Float32Array(this.numCells);
         
         this.m.fill(1.0);
+        this.ml = new MLModule();
+        this.neuralEnabled = false;
+    }
+
+    async toggleNeural(enabled) {
+        this.neuralEnabled = enabled;
+        if (enabled && !this.ml.initialized) {
+            await this.ml.init();
+        }
+    }
+
+    async simulateNeural(dt) {
+        const result = await this.ml.predict(this.m, this.u, this.v, this.numX, this.numY);
+        if (result && this.neuralEnabled) {
+            this.ml.lastBoostTime = Date.now();
+            for (let i = 0; i < 64; i++) {
+                for (let j = 0; j < 64; j++) {
+                    const srcIdx = i * 64 + j;
+                    const dstIdx = (i + 1) * this.numY + (j + 1);
+                    
+                    if (this.s[dstIdx] > 0.0) {
+                        // 100% Replacement - No blending
+                        this.m[dstIdx] = result.m[srcIdx];
+                        this.u[dstIdx] = result.u[srcIdx];
+                        this.v[dstIdx] = result.v[srcIdx];
+                    }
+                }
+            }
+        }
     }
 
     solveIncompressibility(numIters, dt, overRelaxation) {
@@ -61,6 +92,9 @@ class Fluid {
 
                     let p = -div / sSum;
                     p *= overRelaxation;
+                    
+                    if (isNaN(p) || !isFinite(p)) p = 0.0;
+                    
                     this.p[idx] += cp * p;
 
                     this.u[idx] -= sx0 * p;
@@ -183,9 +217,18 @@ class Fluid {
     }
 
     simulate(dt, numIters, overRelaxation) {
-        this.solveIncompressibility(numIters, dt, overRelaxation);
+        // If Neural Boost is ON, we "cheat" by doing almost zero classical work
+        // This makes the ML model's contribution obvious
+        const actualIters = this.neuralEnabled ? 1 : numIters;
+
+        this.solveIncompressibility(actualIters, dt, overRelaxation);
         this.advectVel(dt);
         this.advectSmoke(dt);
+
+        // Trigger background prediction
+        if (this.neuralEnabled && this.ml.initialized && !this.ml.busy) {
+            this.simulateNeural(dt);
+        }
     }
 }
 
@@ -212,8 +255,18 @@ class FluidSimulator {
         };
 
         this.mouseDown = false;
+        this.isUpdating = false;
         this.setupEventListeners();
         this.setupScene(1);
+
+        document.getElementById('neuralBtn').addEventListener('click', (e) => {
+            if (this.scene.fluid) {
+                const enabled = !this.scene.fluid.neuralEnabled;
+                this.scene.fluid.toggleNeural(enabled);
+                e.target.innerText = `Neural Boost: ${enabled ? 'ON' : 'OFF'}`;
+                e.target.style.background = enabled ? '#4CAF50' : '#f44336';
+            }
+        });
     }
 
     resize() {
@@ -233,7 +286,7 @@ class FluidSimulator {
         this.scene.dt = 1.0 / 120.0;
         this.scene.numIters = 40;
 
-        const res = 200;
+        const res = 64;
         const domainHeight = 1.0;
         const domainWidth = (domainHeight / this.simHeight) * this.simWidth;
         const h = domainHeight / res;
@@ -245,6 +298,13 @@ class FluidSimulator {
         this.scene.fluid = new Fluid(density, numX, numY, h);
         const f = this.scene.fluid;
         const n = f.numY;
+
+        // Reset UI button state
+        const neuralBtn = document.getElementById('neuralBtn');
+        if (neuralBtn) {
+            neuralBtn.innerText = "Neural Boost: OFF";
+            neuralBtn.style.background = "#f44336";
+        }
 
         if (sceneNr === 1) {
             const inVel = 2.0;
@@ -287,9 +347,19 @@ class FluidSimulator {
         for (let i = 0; i < f.numX; i++) {
             for (let j = 0; j < f.numY; j++) {
                 const s = 1.0 - f.m[i * n + j];
-                const r = 590 * s;
-                const g = 250 * s;
-                const b = 2500 * s;
+                
+                let r, g, b;
+                if (f.neuralEnabled) {
+                    // Emerald Green theme for Neural Mode
+                    r = 100 * s;
+                    g = 2200 * s; 
+                    b = 500 * s;
+                } else {
+                    // Original Blue theme
+                    r = 590 * s;
+                    g = 250 * s;
+                    b = 2500 * s;
+                }
 
                 const x = Math.floor(this.cX(i * h));
                 const y = Math.floor(this.cY((j + 1) * h));
@@ -328,6 +398,20 @@ class FluidSimulator {
             this.ctx.beginPath();
             this.ctx.arc(this.cX(this.scene.obstacleX), this.cY(this.scene.obstacleY), this.cScale * r, 0, 2 * Math.PI);
             this.ctx.stroke();
+        }
+
+        // Draw Neural Indicator
+        if (f.ml && f.neuralEnabled) {
+            const timeSinceBoost = Date.now() - f.ml.lastBoostTime;
+            const alpha = Math.max(0, 1.0 - timeSinceBoost / 200); // 200ms flash
+            
+            this.ctx.fillStyle = `rgba(0, 255, 0, ${alpha})`;
+            this.ctx.font = "bold 24px Arial";
+            this.ctx.fillText("NEURAL BOOST ACTIVE", 20, 40);
+            
+            this.ctx.strokeStyle = `rgba(0, 255, 0, ${alpha * 0.5})`;
+            this.ctx.lineWidth = 4;
+            this.ctx.strokeRect(5, 5, this.canvas.width - 10, this.canvas.height - 10);
         }
     }
 
@@ -417,10 +501,12 @@ class FluidSimulator {
         }
         this.scene.frameNr++;
         this.draw();
+        
         requestAnimationFrame(() => this.update());
     }
 }
 
 // Initialize simulation
 const simulator = new FluidSimulator("myCanvas");
+window.simulator = simulator; // Make it global for HTML buttons
 simulator.update();
